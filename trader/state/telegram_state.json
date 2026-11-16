@@ -1,6 +1,19 @@
 {
   "date": "2026-11-16",
-  "triggered": [],
+  "triggered": [
+    "ABNB",
+    "APP",
+    "BRK.B",
+    "CB",
+    "CBRS",
+    "CL",
+    "CMCSA",
+    "KDP",
+    "KMB",
+    "PEP",
+    "TEAM",
+    "U"
+  ],
   "errors": [],
   "scan_done": true
 }
