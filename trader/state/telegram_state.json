@@ -1,10 +1,21 @@
 {
   "date": "2026-11-17",
   "triggered": [
+    "CL",
+    "CMCSA",
+    "CMI",
+    "COST",
+    "DUK",
     "HD",
+    "KO",
     "LOW",
     "MCD",
-    "TGT"
+    "MO",
+    "PG",
+    "TGT",
+    "TMUS",
+    "TSCO",
+    "UPS"
   ],
   "errors": [],
   "scan_done": true
