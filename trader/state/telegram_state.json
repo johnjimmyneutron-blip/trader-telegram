@@ -1,6 +1,11 @@
 {
   "date": "2026-11-17",
-  "triggered": [],
+  "triggered": [
+    "HD",
+    "LOW",
+    "MCD",
+    "TGT"
+  ],
   "errors": [],
   "scan_done": true
 }
