@@ -1,7 +1,10 @@
 {
   "date": "2026-11-18",
   "triggered": [
-    "CMG"
+    "CMG",
+    "CVNA",
+    "RTX",
+    "TSCO"
   ],
   "errors": [],
   "scan_done": true
