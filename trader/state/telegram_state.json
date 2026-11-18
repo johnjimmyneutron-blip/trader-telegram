@@ -1,6 +1,8 @@
 {
   "date": "2026-11-18",
-  "triggered": [],
+  "triggered": [
+    "CMG"
+  ],
   "errors": [],
   "scan_done": true
 }
