@@ -1,6 +1,14 @@
 {
   "date": "2026-11-19",
-  "triggered": [],
+  "triggered": [
+    "AKAM",
+    "AMD",
+    "BABA",
+    "COF",
+    "INTC",
+    "SPOT",
+    "TJX"
+  ],
   "errors": [],
   "scan_done": true
 }
