@@ -1,13 +1,17 @@
 {
   "date": "2026-11-20",
   "triggered": [
+    "ASTS",
     "BABA",
     "CAT",
     "CMI",
+    "GOOG",
     "INSM",
     "INTC",
+    "NOW",
     "SAP",
-    "TEAM"
+    "TEAM",
+    "TWLO"
   ],
   "errors": [],
   "scan_done": true
