@@ -2,6 +2,7 @@
   "date": "2026-11-20",
   "triggered": [
     "ASTS",
+    "AXON",
     "BA",
     "BABA",
     "CAT",
@@ -16,7 +17,9 @@
     "NOW",
     "SAP",
     "TEAM",
-    "TWLO"
+    "TWLO",
+    "UNH",
+    "VEEV"
   ],
   "errors": [],
   "scan_done": true
