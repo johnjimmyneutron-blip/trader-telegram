@@ -1,6 +1,14 @@
 {
   "date": "2026-11-20",
-  "triggered": [],
+  "triggered": [
+    "BABA",
+    "CAT",
+    "CMI",
+    "INSM",
+    "INTC",
+    "SAP",
+    "TEAM"
+  ],
   "errors": [],
   "scan_done": true
 }
