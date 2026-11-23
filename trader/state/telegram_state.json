@@ -2,12 +2,16 @@
   "date": "2026-11-23",
   "triggered": [
     "BA",
+    "CMI",
+    "INTC",
     "MCHP",
     "MRVL",
     "MU",
     "NOW",
     "NVDA",
+    "PLTR",
     "SHOP",
+    "TER",
     "UNH"
   ],
   "errors": [],
