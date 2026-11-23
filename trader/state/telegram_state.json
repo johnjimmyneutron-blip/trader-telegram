@@ -1,6 +1,8 @@
 {
   "date": "2026-11-23",
   "triggered": [
+    "BA",
+    "MU",
     "NVDA"
   ],
   "errors": [],
