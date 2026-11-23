@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -49,6 +50,10 @@ DEFAULTS = {
     "top_hits": 15,             # gunluk tarama mesajindaki hisse sayisi
     "daily_args": [],           # scan.py daily icin ek argumanlar
     "orb_args": [],             # scan.py orb icin ek argumanlar
+    "simulate": True,           # her yeni sinyal icin plan + zaman makinesi
+    "sim_max": 12,              # bir turda en fazla bu kadar sinyal simule edilir
+    "sim_until": "15:55",       # simulasyon bu New York saatinde biter (gun sonu)
+    "tm_args": [],              # timemachine.py run icin ek argumanlar
 }
 SETUP_TR = {
     "breakout_20d": "20g zirve kırılımı",
@@ -283,6 +288,60 @@ def watch_symbols(cfg):
     return [h["symbol"] for h in wl.get("hits", []) if h.get("symbol")][:int(cfg["max_symbols"])]
 
 
+def pct(x):
+    return ("%.0f" % (x * 100)) if x >= 0.095 else ("%.1f" % (x * 100)).replace(".", ",")
+
+
+def r_txt(x):
+    return ("%+.2f" % x).replace(".", ",").replace("-", "−") + "R"
+
+
+def simulate(h, clock, now_arg, cfg):
+    """Exit plan + Time Machine for one ORB hit; returns message lines (never raises)."""
+    tmp = tempfile.mkdtemp(prefix="tm-")
+    plan_path = os.path.join(tmp, "plan.json")
+    try:
+        code, out, err = run_script("trader-exit/exit.py", [
+            "plan", "--symbol", h["symbol"], "--entry", h["price"], "--or-high", h["or_high"],
+            "--or-low", h["or_low"], "--time", h["at"], "--date", clock["date"],
+            "--write", plan_path, "--json"] + now_arg, timeout=120)
+        if code != 0 or not os.path.exists(plan_path):
+            reason = (err.strip() or out.strip()).splitlines()
+            return ["  plan yok: %s" % (reason[-1][:160] if reason else "exit.py hata verdi")]
+        plan = read_json(plan_path, {})
+        lines = ["  stop %s · hedef %s (2R) · risk %s$/hisse" % (
+            money(plan["stop"]), money(plan["target"]), money(plan["risk_per_share"]))]
+        code, out, err = run_script("trader-timemachine/timemachine.py", [
+            "run", "--plan", plan_path, "--until", cfg["sim_until"], "--json"]
+            + now_arg + list(cfg["tm_args"]), timeout=180)
+        try:
+            tm = json.loads(out)
+        except ValueError:
+            reason = (err.strip() or out.strip()).splitlines()
+            return lines + ["  simülasyon yok: %s" % (reason[-1][:160] if reason else "hata")]
+        mc, hist = tm.get("mc", {}), tm.get("history", {})
+        lines.append("  simülasyon: hedef %%%s · stop %%%s · ikisi de değil %%%s · ort. %s" % (
+            pct(mc.get("p_target", 0)), pct(mc.get("p_stop", 0)), pct(mc.get("p_neither", 0)),
+            r_txt(mc.get("avg_R", 0))))
+        if hist.get("triggered"):
+            lines.append("  geçmiş %d gün: %d sinyal, %d hedef, %d stop · ort. %s" % (
+                hist.get("sessions", 0), hist["triggered"], hist.get("target", 0), hist.get("stop", 0),
+                r_txt(hist.get("avg_R", 0))))
+        return lines
+    except NotifyError as e:
+        return ["  simülasyon yok: %s" % e]
+    finally:
+        for f in os.listdir(tmp):
+            try:
+                os.remove(os.path.join(tmp, f))
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp)
+        except OSError:
+            pass
+
+
 def job_orb(cfg, clock, now_arg, state):
     syms = watch_symbols(cfg)
     if not syms:
@@ -303,16 +362,26 @@ def job_orb(cfg, clock, now_arg, state):
     now_min = minutes(clock["now_new_york"].split()[1])
     new.sort(key=lambda h: clock12_minutes(h["at"]), reverse=True)
     lines = ["Açılış aralığı kırılımı (%s, New York %s)" % (local_hhmm(day, now_min), hm(now_min))]
-    for h in new:
+    n_sim = int(cfg["sim_max"]) if cfg.get("simulate") else 0
+    for i, h in enumerate(new):
         at = clock12_minutes(h["at"])
         age = now_min - at
         late = "  [%d dk önce, geç]" % age if age > 10 else ""
-        lines.append("%-5s %s$  %s'de aralık tepesi %s$ üstünde kapandı (+%%%s), aralık %s - %s%s" % (
+        if i:
+            lines.append("")
+        lines.append("%-5s %s$ · kırılım saati %s · aralık tepesi %s$ üstünde kapandı (+%%%s), aralık %s - %s%s" % (
             h["symbol"], money(h["price"]), local_hhmm(day, at), money(h["or_high"]),
             ("%.2f" % h["pct_over"]).replace(".", ","), money(h["or_low"]), money(h["or_high"]), late))
+        if i < n_sim:
+            lines.extend(simulate(h, clock, now_arg, cfg))
     lines.append("")
-    lines.append("%d hisse izlendi. Sinyal bir emir değildir: önce stop ve hedef (exit.py plan), "
-                 "sonra zaman makinesi." % len(syms))
+    if n_sim:
+        lines.append("Simülasyon sinyal fiyatından, gün sonu %s New York'a kadar; tahmin değildir. "
+                     "2R hedefte başa baş için hedefin, sonuçlananların %%33'ünde önce gelmesi gerekir."
+                     % cfg["sim_until"])
+    if len(new) > n_sim and cfg.get("simulate"):
+        lines.append("İlk %d sinyal simüle edildi." % n_sim)
+    lines.append("%d hisse izlendi. Sinyal bir emir değildir." % len(syms))
     state["triggered"] = sorted(seen | set(h["symbol"] for h in new))
     return "\n".join(lines)
 
