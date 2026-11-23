@@ -1,29 +1,5 @@
 {
-  "date": "2026-11-20",
-  "triggered": [
-    "ASTS",
-    "AXON",
-    "BA",
-    "BABA",
-    "CAT",
-    "CMCSA",
-    "CMI",
-    "COF",
-    "COIN",
-    "CRM",
-    "FSLR",
-    "GME",
-    "GOOG",
-    "INSM",
-    "INTC",
-    "NOW",
-    "SAP",
-    "TEAM",
-    "TMUS",
-    "TWLO",
-    "UNH",
-    "VEEV"
-  ],
-  "errors": [],
-  "scan_done": true
+  "date": "2026-11-23",
+  "triggered": [],
+  "errors": []
 }
