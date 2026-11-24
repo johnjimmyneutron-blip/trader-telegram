@@ -3,11 +3,14 @@
   "triggered": [
     "AAPL",
     "BAC",
+    "GS",
+    "HD",
     "INTU",
     "LIN",
     "MS",
     "NFLX",
     "NOW",
+    "PLTR",
     "UNH",
     "WMT"
   ],
