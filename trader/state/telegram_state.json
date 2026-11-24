@@ -1,6 +1,13 @@
 {
   "date": "2026-11-24",
-  "triggered": [],
+  "triggered": [
+    "AAPL",
+    "BAC",
+    "INTU",
+    "NFLX",
+    "NOW",
+    "UNH"
+  ],
   "errors": [
     "günlük tarama"
   ],
