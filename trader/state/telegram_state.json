@@ -4,9 +4,12 @@
     "AAPL",
     "BAC",
     "INTU",
+    "LIN",
+    "MS",
     "NFLX",
     "NOW",
-    "UNH"
+    "UNH",
+    "WMT"
   ],
   "errors": [
     "günlük tarama"
