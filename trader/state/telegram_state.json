@@ -1,29 +1,5 @@
 {
-  "date": "2026-11-23",
-  "triggered": [
-    "BA",
-    "BAC",
-    "C",
-    "CMI",
-    "COIN",
-    "CRM",
-    "GOOG",
-    "GOOGL",
-    "INTC",
-    "INTU",
-    "MCHP",
-    "MELI",
-    "MRVL",
-    "MU",
-    "NOW",
-    "NVDA",
-    "PEP",
-    "PLTR",
-    "SHOP",
-    "TER",
-    "TMUS",
-    "UNH"
-  ],
-  "errors": [],
-  "scan_done": true
+  "date": "2026-11-24",
+  "triggered": [],
+  "errors": []
 }
