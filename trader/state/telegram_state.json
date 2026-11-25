@@ -1,22 +1,6 @@
 {
-  "date": "2026-11-24",
-  "triggered": [
-    "AAPL",
-    "BA",
-    "BAC",
-    "GS",
-    "HD",
-    "INTU",
-    "LIN",
-    "MS",
-    "NFLX",
-    "NOW",
-    "PLTR",
-    "UNH",
-    "WMT"
-  ],
-  "errors": [
-    "günlük tarama"
-  ],
-  "scan_done": true
+  "date": "2026-11-25",
+  "triggered": [],
+  "errors": [],
+  "journal_checked": "2026-11-25"
 }
