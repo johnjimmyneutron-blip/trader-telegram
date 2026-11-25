@@ -1,6 +1,8 @@
 {
   "date": "2026-11-25",
-  "triggered": [],
+  "triggered": [
+    "VALE"
+  ],
   "errors": [],
   "journal_checked": "2026-11-25",
   "scan_done": true

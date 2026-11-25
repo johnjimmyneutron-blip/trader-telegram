@@ -1,2 +1,3 @@
 date,symbol,signal_time,entry,stop,target,risk,sim_target,sim_stop,sim_neither,sim_avg_r,hist_signals,hist_target,hist_stop,hist_avg_r,filter,outcome,exit_price,r,source
 2026-11-24,WMT,9:55 AM,131.3,130.51,132.88,0.79,0.23,0.46,0.31,0.15,37,6,14,0.17,1,kapanış,132.3,1.27,manuel
+2026-11-25,VALE,9:55 AM,9.4,9.31,9.58,0.09,0.1215,0.5948,0.2837,-0.248,27,6,12,0.212,0,,,,otomatik
