@@ -21,6 +21,8 @@ Her turda New York saatine bakar (yaz/kis saati kendiliginden dogru olur):
 Hicbir emir vermez. Mesajlar bilgi icindir, yatirim tavsiyesi degildir.
 """
 import argparse
+import csv
+import gzip
 import datetime
 import json
 import os
@@ -54,7 +56,14 @@ DEFAULTS = {
     "sim_max": 12,              # bir turda en fazla bu kadar sinyal simule edilir
     "sim_until": "15:55",       # simulasyon bu New York saatinde biter (gun sonu)
     "tm_args": [],              # timemachine.py run icin ek argumanlar
+    "journal": True,            # her simule edilen sinyali trader/journal.csv'ye yaz, ertesi gun sonucla
+    "eval_offline": "",         # test icin: sonuclari bu Yahoo chart dosyasindan oku
 }
+JOURNAL = os.path.join("trader", "journal.csv")
+JFIELDS = ["date", "symbol", "signal_time", "entry", "stop", "target", "risk",
+           "sim_target", "sim_stop", "sim_neither", "sim_avg_r", "hist_signals", "hist_target",
+           "hist_stop", "hist_avg_r", "filter", "outcome", "exit_price", "r", "source"]
+UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
 SETUP_TR = {
     "breakout_20d": "20g zirve kırılımı",
     "bull_flag": "bayrak",
@@ -288,6 +297,149 @@ def watch_symbols(cfg):
     return [h["symbol"] for h in wl.get("hits", []) if h.get("symbol")][:int(cfg["max_symbols"])]
 
 
+# ---------- journal: every simulated signal, scored the next trading day ----------
+
+def journal_read():
+    try:
+        with open(JOURNAL, encoding="utf-8", newline="") as fh:
+            return list(csv.DictReader(fh))
+    except OSError:
+        return []
+
+
+def journal_write(rows):
+    os.makedirs(os.path.dirname(JOURNAL), exist_ok=True)
+    tmp = JOURNAL + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=JFIELDS, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    os.replace(tmp, JOURNAL)
+
+
+def journal_add(row):
+    rows = journal_read()
+    if any(r["date"] == row["date"] and r["symbol"] == row["symbol"] for r in rows):
+        return
+    rows.append(row)
+    journal_write(rows)
+
+
+def fetch_bars(sym, cfg):
+    """5-minute bars of the last 5 sessions -> list of (utc datetime, high, low, close)."""
+    if cfg.get("eval_offline"):
+        path = cfg["eval_offline"]
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    else:
+        doc, last = None, None
+        for host in ("query2", "query1"):
+            url = "https://%s.finance.yahoo.com/v8/finance/chart/%s?range=5d&interval=5m" % (
+                host, urllib.parse.quote(sym.upper().replace(".", "-")))
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}),
+                                            timeout=30) as r:
+                    doc = json.loads(r.read().decode("utf-8"))
+                break
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                last = e
+                time.sleep(1)
+        if doc is None:
+            raise NotifyError("%s verisi alınamadı: %s" % (sym, last))
+    res = ((doc.get("chart") or {}).get("result") or [None])[0]
+    if not res or not res.get("timestamp"):
+        raise NotifyError("%s için çubuk verisi yok" % sym)
+    q = res["indicators"]["quote"][0]
+    out = []
+    for i, ts in enumerate(res["timestamp"]):
+        hi, lo, cl = q["high"][i], q["low"][i], q["close"][i]
+        if None in (hi, lo, cl):
+            continue
+        out.append((datetime.datetime.fromtimestamp(ts, datetime.timezone.utc), hi, lo, cl))
+    return out
+
+
+def score(row, bars, flat_by="15:55"):
+    """Walk the session after the entry bar. Stop and target in the same bar count as the stop."""
+    day = datetime.date.fromisoformat(row["date"])
+    off = datetime.timedelta(hours=ny_utc_offset(day))
+    start = clock12_minutes(row["signal_time"])           # the entry bar's close = next bar's start
+    end = minutes(flat_by)                                  # last bar must close by flat_by
+    entry, stop, target, risk = (float(row[k]) for k in ("entry", "stop", "target", "risk"))
+    session = []
+    for t, hi, lo, cl in bars:
+        ny = (t - off).replace(tzinfo=None)
+        if ny.date() != day:
+            continue
+        m = ny.hour * 60 + ny.minute
+        if start <= m and m + 5 <= end:
+            session.append((m, hi, lo, cl))
+    if not session:
+        return None
+    session.sort()
+    for m, hi, lo, cl in session:
+        if lo <= stop:
+            return "stop", stop, -1.0
+        if hi >= target:
+            return "hedef", target, round((target - entry) / risk, 2)
+    last_close = session[-1][3]
+    return "kapanış", round(last_close, 2), round((last_close - entry) / risk, 2)
+
+
+def r_sum(rows):
+    rs = [float(r["r"]) for r in rows if r.get("r") not in ("", None)]
+    return len(rs), (sum(rs) / len(rs) if rs else 0.0), sum(rs)
+
+
+def job_journal(cfg, clock):
+    """Score yesterday's (and any older) open rows; one summary message."""
+    rows = journal_read()
+    pending = [r for r in rows if not r.get("outcome") and r["date"] < clock["date"]]
+    if not pending:
+        return None
+    cache, failed = {}, []
+    for r in pending:
+        try:
+            if r["symbol"] not in cache:
+                cache[r["symbol"]] = fetch_bars(r["symbol"], cfg)
+            got = score(r, cache[r["symbol"]])
+        except NotifyError as e:
+            failed.append("%s (%s)" % (r["symbol"], e))
+            continue
+        if got is None:
+            failed.append("%s (%s günü için çubuk yok)" % (r["symbol"], r["date"]))
+            continue
+        r["outcome"], r["exit_price"], r["r"] = got[0], got[1], got[2]
+    journal_write(rows)
+    done = [r for r in pending if r.get("outcome")]
+    if not done and not failed:
+        return None
+    days = sorted(set(r["date"] for r in done)) or sorted(set(r["date"] for r in pending))
+    lines = ["Sinyal sonuçları (%s)" % ", ".join(days)]
+    flt = [r for r in done if r["filter"] == "1"]
+    for r in sorted(done, key=lambda r: (r["filter"] != "1", r["symbol"])):
+        if r["filter"] != "1":
+            continue
+        lines.append("✓ %-5s %s: %s %s$ → %s" % (r["symbol"], r["signal_time"], r["outcome"],
+                                               money(float(r["exit_price"])), r_txt(float(r["r"]))))
+    if not flt:
+        lines.append("Filtreyi geçen sinyal yoktu.")
+    n, avg, _ = r_sum(done)
+    lines.append("Tüm sinyaller: %d işlem, ortalama %s." % (n, r_txt(avg)))
+    scored = [r for r in rows if r.get("r") not in ("", None)]
+    nf, avgf, totf = r_sum([r for r in scored if r["filter"] == "1"])
+    na, avga, _ = r_sum(scored)
+    lines.append("")
+    lines.append("Başlangıçtan beri: filtreyi geçen %d işlem, ort. %s, toplam %s · tümü %d işlem, ort. %s."
+                 % (nf, r_txt(avgf), r_txt(totf), na, r_txt(avga)))
+    if failed:
+        lines.append("Sonuçlanamadı: %s" % "; ".join(failed[:5]))
+    lines.append("Sanal kayıt: sinyal fiyatından giriş, aynı mumda stop ve hedef varsa stop sayılır.")
+    return "\n".join(lines)
+
+
 def pct(x):
     return ("%.0f" % (x * 100)) if x >= 0.095 else ("%.1f" % (x * 100)).replace(".", ",")
 
@@ -297,7 +449,7 @@ def r_txt(x):
 
 
 def simulate(h, clock, now_arg, cfg):
-    """Exit plan + Time Machine for one ORB hit; returns message lines (never raises)."""
+    """Exit plan + Time Machine for one ORB hit -> (message lines, journal row or None). Never raises."""
     tmp = tempfile.mkdtemp(prefix="tm-")
     plan_path = os.path.join(tmp, "plan.json")
     try:
@@ -307,7 +459,7 @@ def simulate(h, clock, now_arg, cfg):
             "--write", plan_path, "--json"] + now_arg, timeout=120)
         if code != 0 or not os.path.exists(plan_path):
             reason = (err.strip() or out.strip()).splitlines()
-            return ["  plan yok: %s" % (reason[-1][:160] if reason else "exit.py hata verdi")]
+            return ["  plan yok: %s" % (reason[-1][:160] if reason else "exit.py hata verdi")], None
         plan = read_json(plan_path, {})
         lines = ["  stop %s · hedef %s (2R) · risk %s$/hisse" % (
             money(plan["stop"]), money(plan["target"]), money(plan["risk_per_share"]))]
@@ -318,8 +470,9 @@ def simulate(h, clock, now_arg, cfg):
             tm = json.loads(out)
         except ValueError:
             reason = (err.strip() or out.strip()).splitlines()
-            return lines + ["  simülasyon yok: %s" % (reason[-1][:160] if reason else "hata")]
+            return lines + ["  simülasyon yok: %s" % (reason[-1][:160] if reason else "hata")], None
         mc, hist = tm.get("mc", {}), tm.get("history", {})
+        passed = bool(hist.get("triggered")) and mc.get("avg_R", 0) > 0 and hist.get("avg_R", 0) > 0
         lines.append("  simülasyon: hedef %%%s · stop %%%s · ikisi de değil %%%s · ort. %s" % (
             pct(mc.get("p_target", 0)), pct(mc.get("p_stop", 0)), pct(mc.get("p_neither", 0)),
             r_txt(mc.get("avg_R", 0))))
@@ -327,9 +480,19 @@ def simulate(h, clock, now_arg, cfg):
             lines.append("  geçmiş %d gün: %d sinyal, %d hedef, %d stop · ort. %s" % (
                 hist.get("sessions", 0), hist["triggered"], hist.get("target", 0), hist.get("stop", 0),
                 r_txt(hist.get("avg_R", 0))))
-        return lines
+        if passed:
+            lines.append("  ✓ filtre: simülasyon ve geçmiş ortalaması ikisi de artıda")
+        row = {"date": clock["date"], "symbol": h["symbol"], "signal_time": h["at"],
+               "entry": plan["entry"], "stop": plan["stop"], "target": plan["target"],
+               "risk": plan["risk_per_share"], "sim_target": mc.get("p_target"),
+               "sim_stop": mc.get("p_stop"), "sim_neither": mc.get("p_neither"),
+               "sim_avg_r": mc.get("avg_R"), "hist_signals": hist.get("triggered", 0),
+               "hist_target": hist.get("target", 0), "hist_stop": hist.get("stop", 0),
+               "hist_avg_r": hist.get("avg_R", 0), "filter": "1" if passed else "0",
+               "outcome": "", "exit_price": "", "r": "", "source": "otomatik"}
+        return lines, row
     except NotifyError as e:
-        return ["  simülasyon yok: %s" % e]
+        return ["  simülasyon yok: %s" % e], None
     finally:
         for f in os.listdir(tmp):
             try:
@@ -373,7 +536,10 @@ def job_orb(cfg, clock, now_arg, state):
             h["symbol"], money(h["price"]), local_hhmm(day, at), money(h["or_high"]),
             ("%.2f" % h["pct_over"]).replace(".", ","), money(h["or_low"]), money(h["or_high"]), late))
         if i < n_sim:
-            lines.extend(simulate(h, clock, now_arg, cfg))
+            sim_lines, row = simulate(h, clock, now_arg, cfg)
+            lines.extend(sim_lines)
+            if row and cfg.get("journal"):
+                journal_add(row)
     lines.append("")
     if n_sim:
         lines.append("Simülasyon sinyal fiyatından, gün sonu %s New York'a kadar; tahmin değildir. "
@@ -442,6 +608,10 @@ def tick(a):
                         log("hata mesajı gönderilemedi: %s" % e2)
                 return False
 
+        if cfg.get("journal") and state.get("journal_checked") != clock["date"]:
+            if guarded("sonuçlar", lambda: job_journal(cfg, clock)):
+                state["journal_checked"] = clock["date"]
+            write_json(STATE, state)
         if not state.get("scan_done") and minutes(cfg["scan_time"]) <= now_min < closes:
             if guarded("günlük tarama", lambda: job_daily(cfg, clock, now_arg, state)):
                 state["scan_done"] = True
