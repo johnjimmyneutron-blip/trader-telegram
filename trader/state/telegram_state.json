@@ -2,6 +2,7 @@
   "date": "2026-11-25",
   "triggered": [
     "ANF",
+    "BMNR",
     "BSX",
     "COF",
     "COIN",
@@ -12,7 +13,9 @@
     "FTNT",
     "INSM",
     "INTU",
+    "KO",
     "MA",
+    "MSTR",
     "PDD",
     "PEP",
     "RCL",
