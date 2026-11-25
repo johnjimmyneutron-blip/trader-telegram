@@ -2,6 +2,8 @@
   "date": "2026-11-25",
   "triggered": [
     "ANF",
+    "BSX",
+    "COF",
     "CRM",
     "DIS",
     "DKS",
@@ -11,6 +13,7 @@
     "INTU",
     "MA",
     "PEP",
+    "SNY",
     "SPOT",
     "T",
     "UNH",
