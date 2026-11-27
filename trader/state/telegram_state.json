@@ -1,6 +1,12 @@
 {
   "date": "2026-11-27",
-  "triggered": [],
+  "triggered": [
+    "ADP",
+    "CMCSA",
+    "DIS",
+    "INSM",
+    "V"
+  ],
   "errors": [],
   "journal_checked": "2026-11-27",
   "scan_done": true
