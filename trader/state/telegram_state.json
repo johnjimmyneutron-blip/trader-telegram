@@ -2,12 +2,17 @@
   "date": "2026-11-27",
   "triggered": [
     "ADP",
+    "AXON",
     "CMCSA",
     "DIS",
+    "HPQ",
+    "IBM",
     "INSM",
     "MSI",
     "NEE",
+    "QCOM",
     "SBUX",
+    "SNDK",
     "V",
     "VZ"
   ],
