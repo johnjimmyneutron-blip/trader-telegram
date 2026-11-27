@@ -62,7 +62,9 @@ DEFAULTS = {
 JOURNAL = os.path.join("trader", "journal.csv")
 JFIELDS = ["date", "symbol", "signal_time", "entry", "stop", "target", "risk",
            "sim_target", "sim_stop", "sim_neither", "sim_avg_r", "hist_signals", "hist_target",
-           "hist_stop", "hist_avg_r", "filter", "outcome", "exit_price", "r", "source"]
+           "hist_stop", "hist_avg_r", "filter", "outcome", "exit_price", "r", "source",
+           "swing_outcome", "swing_day", "swing_exit", "swing_r"]
+SWING_DAYS = 5   # "beklenseydi": gun sonunda acik kalan islem en fazla bu kadar seans daha tutulur
 UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
 SETUP_TR = {
     "breakout_20d": "20g zirve kırılımı",
@@ -326,8 +328,8 @@ def journal_add(row):
     journal_write(rows)
 
 
-def fetch_bars(sym, cfg):
-    """5-minute bars of the last 5 sessions -> list of (utc datetime, high, low, close)."""
+def fetch_bars(sym, cfg, rng="1mo"):
+    """5-minute bars of the last month -> list of (utc datetime, open, high, low, close)."""
     if cfg.get("eval_offline"):
         path = cfg["eval_offline"]
         opener = gzip.open if path.endswith(".gz") else open
@@ -336,8 +338,8 @@ def fetch_bars(sym, cfg):
     else:
         doc, last = None, None
         for host in ("query2", "query1"):
-            url = "https://%s.finance.yahoo.com/v8/finance/chart/%s?range=5d&interval=5m" % (
-                host, urllib.parse.quote(sym.upper().replace(".", "-")))
+            url = "https://%s.finance.yahoo.com/v8/finance/chart/%s?range=%s&interval=5m" % (
+                host, urllib.parse.quote(sym.upper().replace(".", "-")), rng)
             try:
                 with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}),
                                             timeout=30) as r:
@@ -354,10 +356,10 @@ def fetch_bars(sym, cfg):
     q = res["indicators"]["quote"][0]
     out = []
     for i, ts in enumerate(res["timestamp"]):
-        hi, lo, cl = q["high"][i], q["low"][i], q["close"][i]
-        if None in (hi, lo, cl):
+        op, hi, lo, cl = q["open"][i], q["high"][i], q["low"][i], q["close"][i]
+        if None in (op, hi, lo, cl):
             continue
-        out.append((datetime.datetime.fromtimestamp(ts, datetime.timezone.utc), hi, lo, cl))
+        out.append((datetime.datetime.fromtimestamp(ts, datetime.timezone.utc), op, hi, lo, cl))
     return out
 
 
@@ -369,7 +371,7 @@ def score(row, bars, flat_by="15:55"):
     end = minutes(flat_by)                                  # last bar must close by flat_by
     entry, stop, target, risk = (float(row[k]) for k in ("entry", "stop", "target", "risk"))
     session = []
-    for t, hi, lo, cl in bars:
+    for t, op, hi, lo, cl in bars:
         ny = (t - off).replace(tzinfo=None)
         if ny.date() != day:
             continue
@@ -388,6 +390,43 @@ def score(row, bars, flat_by="15:55"):
     return "kapanış", round(last_close, 2), round((last_close - entry) / risk, 2)
 
 
+def regular_bars(bars):
+    """{New York date: [(minute, open, high, low, close), ...]} for 9:30-16:00 bars."""
+    days = {}
+    for t, op, hi, lo, cl in bars:
+        d = t.date()
+        ny = (t - datetime.timedelta(hours=ny_utc_offset(d))).replace(tzinfo=None)
+        m = ny.hour * 60 + ny.minute
+        if 570 <= m and m + 5 <= 960:
+            days.setdefault(ny.date(), []).append((m, op, hi, lo, cl))
+    for v in days.values():
+        v.sort()
+    return days
+
+
+def swing(row, bars, max_days=SWING_DAYS):
+    """A trade still open at the close, held up to max_days more sessions with the same stop
+    and target. A gap through the stop or the target fills at that bar's open."""
+    day = datetime.date.fromisoformat(row["date"])
+    entry, stop, target, risk = (float(row[k]) for k in ("entry", "stop", "target", "risk"))
+    after = sorted(d for d in regular_bars(bars) if d > day)[:max_days]
+    days = regular_bars(bars)
+    for n, d in enumerate(after, 1):
+        for m, op, hi, lo, cl in days[d]:
+            if op <= stop:
+                return "stop", n, round(op, 2), round((op - entry) / risk, 2)
+            if op >= target:
+                return "hedef", n, round(op, 2), round((op - entry) / risk, 2)
+            if lo <= stop:
+                return "stop", n, stop, -1.0
+            if hi >= target:
+                return "hedef", n, target, round((target - entry) / risk, 2)
+    if len(after) < max_days:
+        return None                       # not enough sessions yet: try again tomorrow
+    last = days[after[-1]][-1][4]
+    return "açık", max_days, round(last, 2), round((last - entry) / risk, 2)
+
+
 def r_sum(rows):
     rs = [float(r["r"]) for r in rows if r.get("r") not in ("", None)]
     return len(rs), (sum(rs) / len(rs) if rs else 0.0), sum(rs)
@@ -397,9 +436,16 @@ def job_journal(cfg, clock):
     """Score yesterday's (and any older) open rows; one summary message."""
     rows = journal_read()
     pending = [r for r in rows if not r.get("outcome") and r["date"] < clock["date"]]
-    if not pending:
-        return None
     cache, failed = {}, []
+    swing_msg = job_swing(rows, cfg, clock, cache, failed)
+    if not pending:
+        journal_write(rows)
+        if not swing_msg:
+            return None
+        lines = swing_msg
+        if failed:
+            lines.append("Sonuçlanamadı: %s" % "; ".join(failed[:5]))
+        return "\n".join(lines)
     for r in pending:
         try:
             if r["symbol"] not in cache:
@@ -434,10 +480,45 @@ def job_journal(cfg, clock):
     lines.append("")
     lines.append("Başlangıçtan beri: filtreyi geçen %d işlem, ort. %s, toplam %s · tümü %d işlem, ort. %s."
                  % (nf, r_txt(avgf), r_txt(totf), na, r_txt(avga)))
+    # swing for rows scored just now happens tomorrow; older rows were handled above
+    if swing_msg:
+        lines.append("")
+        lines.extend(swing_msg)
     if failed:
         lines.append("Sonuçlanamadı: %s" % "; ".join(failed[:5]))
     lines.append("Sanal kayıt: sinyal fiyatından giriş, aynı mumda stop ve hedef varsa stop sayılır.")
     return "\n".join(lines)
+
+
+def job_swing(rows, cfg, clock, cache, failed):
+    """Rows closed at the bell ("kapanış"): what if we had held them? Returns message lines."""
+    todo = [r for r in rows if r.get("outcome") == "kapanış" and not r.get("swing_outcome")
+            and r["date"] < clock["date"]]
+    done = []
+    for r in todo:
+        try:
+            if r["symbol"] not in cache:
+                cache[r["symbol"]] = fetch_bars(r["symbol"], cfg)
+            got = swing(r, cache[r["symbol"]])
+        except NotifyError as e:
+            failed.append("%s (%s)" % (r["symbol"], e))
+            continue
+        if got:
+            r["swing_outcome"], r["swing_day"], r["swing_exit"], r["swing_r"] = got
+            done.append(r)
+    if not done:
+        return []
+    lines = ["Bekleseydik (gün sonunda açık kalanlar, en fazla %d seans daha):" % SWING_DAYS]
+    for r in sorted(done, key=lambda r: (r["date"], r["symbol"])):
+        lines.append("%s%-5s %s: gün içi %s → %s. gün %s %s" % (
+            "✓ " if r["filter"] == "1" else "  ", r["symbol"], r["date"][5:],
+            r_txt(float(r["r"])), r["swing_day"], r["swing_outcome"], r_txt(float(r["swing_r"]))))
+    held = [r for r in rows if r.get("swing_r") not in ("", None)]
+    day_sum = sum(float(r["r"]) for r in held)
+    swing_sum = sum(float(r["swing_r"]) for r in held)
+    lines.append("Başlangıçtan beri bu %d işlemde: gün içi toplam %s, beklenseydi toplam %s." % (
+        len(held), r_txt(day_sum), r_txt(swing_sum)))
+    return lines
 
 
 def pct(x):
