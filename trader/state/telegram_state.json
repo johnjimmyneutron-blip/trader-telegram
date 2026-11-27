@@ -1,35 +1,6 @@
 {
-  "date": "2026-11-25",
-  "triggered": [
-    "ANF",
-    "BMNR",
-    "BSX",
-    "COF",
-    "COIN",
-    "CRM",
-    "DIS",
-    "DKS",
-    "FCX",
-    "FTNT",
-    "INSM",
-    "INTU",
-    "KO",
-    "KYMR",
-    "MA",
-    "MRNA",
-    "MSTR",
-    "PDD",
-    "PEP",
-    "RCL",
-    "SNDK",
-    "SNY",
-    "SPOT",
-    "T",
-    "UNH",
-    "VALE",
-    "VRTX"
-  ],
+  "date": "2026-11-27",
+  "triggered": [],
   "errors": [],
-  "journal_checked": "2026-11-25",
-  "scan_done": true
+  "journal_checked": "2026-11-27"
 }
